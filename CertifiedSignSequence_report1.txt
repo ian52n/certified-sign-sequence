@@ -1,0 +1,111 @@
+This file contains multiple runs
+
+7_1CertifiedSignSequence.jl
+Program Run Time: 0:03:03.741
+Random seed: 933001808
+
+Parameters / Knobs
+  section              = 27.0
+  global_t_max         = 25.0
+  chunk_len            = 1.0
+  target_time_width    = 0.05
+  burn_in              = 5.0
+  hop_min..hop_max     = 1.0..3.0
+  eps_box              = 0.0001
+  init_range           = (-15.0, 15.0, -20.0, 20.0, 10.0, 40.0)
+
+Initial random point   = (11.27808587033853, 12.09432097148251, 21.476247871477046)
+Post burn-in point 1    = (0.47483801458522107, 0.7906085087415444, 11.765895275580109)
+Post-burn in point 2 = (0.7125902140851718, -0.18096368351447584, 20.189714699392795)
+
+Sign sequences separated by newlines:
+RLLLLLR
+RLLLLLR
+
+7_2CertifiedSignSequence.jl
+Program Run Time: 2025-09-07T13:31:05.366
+Random seed: 930415324
+
+Parameters / Knobs
+  section              = 27.0
+  global_t_max         = 25.0
+  chunk_len            = 1.0
+  target_time_width    = 0.05
+  burn_in              = 5.0
+  hop_min..hop_max     = 1.0..3.0
+  eps_box              = 0.0001
+  init_range           = (-15.0, 15.0, -20.0, 20.0, 10.0, 40.0)
+
+Initial random point   = (-13.975531465029519, -8.139724144449527, 24.980481884986823)
+Post burn-in point 1 = [-10.2050646915027, -11.042326499628789, 28.12919615969926]
+Post burn-in point 2 = [-7.385090703462207, -7.772539940669505, 25.112222331379414]
+
+Sign sequences separated by newlines:
+LLLLLLRLLLLRRLR\nRLLLLRL
+
+
+7_3CertifiedSignSequence.jl
+Program Run Time: 0:02:45.534
+Random seed: 930415324
+
+Parameters / Knobs
+  section              = 27.0
+  global_t_max         = 25.0
+  chunk_len            = 1.0
+  target_time_width    = 0.05
+  burn_in              = 5.0
+  hop_min..hop_max     = 1.0..3.0
+  eps_box              = 0.0001
+  init_range           = (-15.0, 15.0, -20.0, 20.0, 10.0, 40.0)
+
+Initial random point   = (-13.975531465029519, -8.139724144449527, 24.980481884986823)
+Post burn-in point 1    = (-10.20507814064993, -11.042315229746569, 28.12924724332252)
+Post-burn in point 2 = (7.54418004047516, 11.083504073729975, 19.70371467629539)
+
+Sign sequences separated by newlines:
+LLLLLLLLLLLLL
+RRRR
+
+7_3CertifiedSignSequence.jl
+Program Run Time: 0:02:47.136
+Random seed: 930415324
+
+Parameters / Knobs
+  section              = 27.0
+  global_t_max         = 25.0
+  chunk_len            = 1.0
+  target_time_width    = 0.05
+  burn_in              = 5.0
+  hop_min..hop_max     = 1.0..3.0
+  eps_box              = 0.0001
+  init_range           = (-15.0, 15.0, -20.0, 20.0, 10.0, 40.0)
+
+Initial random point   = (-13.975531465029519, -8.139724144449527, 24.980481884986823)
+Post burn-in point 1    = (-10.20507814064993, -11.042315229746569, 28.12924724332252)
+Post-burn in point 2 = (7.54418004047516, 11.083504073729975, 19.70371467629539)
+
+Sign sequences separated by newlines:
+LLLLLLLLLLLLL
+RRRR
+
+7_3CertifiedSignSequence.jl
+Program Run Time: 0:02:26.987
+Random seed: 12
+
+Parameters / Knobs
+  section              = 27.0
+  global_t_max         = 25.0
+  chunk_len            = 1.0
+  target_time_width    = 0.05
+  burn_in              = 5.0
+  hop_min..hop_max     = 1.0..3.0
+  eps_box              = 0.0001
+  init_range           = (-15.0, 15.0, -20.0, 20.0, 10.0, 40.0)
+
+Initial random point   = (4.958696281792111, 2.364480018470001, 30.43645919987254)
+Post burn-in point 1    = (9.252846933668092, 13.770395780240566, 21.014111354294016)
+Post-burn in point 2 = (-0.35891862741664304, -0.2466231936726848, 16.05771342510047)
+
+Sign sequences separated by newlines:
+RRRRLLLLLL
+LRRRRRL
