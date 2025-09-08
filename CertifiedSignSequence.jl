@@ -1,5 +1,5 @@
 ############################################################
-# 7_1CertifiedSignSequence.jl — MULTI-SEQUENCE (v7.1)
+# 7_4CertifiedSignSequence.jl — MULTI-SEQUENCE (v7.4)
 #
 # What this version does:
 # • Starts from a random point (or user-provided range), performs
@@ -12,17 +12,22 @@
 #   a random *uncertified* hop, and then generates the next
 #   certified sign sequence; repeats until the requested number of
 #   sequences is produced.
-# • Writes a .txt report in the format the user requested.
+# • Writes a .txt report in the format you requested and appends
+#   to an existing file (prepending a “multiple runs” notice once).
 #
-# Reproducibility change (this edit):
-# • All randomness now comes from a *dedicated* RNG instance
-#   (MersenneTwister seeded with `--seed`). No use of the global
-#   RNG. This makes initial point *and* hop times reproducible.
+# New in this edit:
+# • Added `root_locator` knob with options:
+#     :bisect           — plain bisection
+#     :bisect_squeeze   — bisection + slope squeezing (default)
+#   Slope squeezing uses already-available derivative bounds to
+#   contract the time bracket without re-integration, preserving
+#   rigor and reducing iterations.
+# • Printed `root_locator` in the report.
 #
-# Key Fixes carried over:
-# • Typed local for `last_below_box::Union{Nothing,Hyperrectangle} = nothing`
-#   (avoids Union-constructor error).
-# • Robust CLI parsing for --init-range and numeric knobs.
+# Reproducibility:
+# • All randomness comes from a *dedicated* RNG instance
+#   (MersenneTwister seeded via --seed). Initial point and hop
+#   times are reproducible.
 ############################################################
 
 using ReachabilityAnalysis
@@ -34,7 +39,7 @@ using Random
 using Printf
 
 const IA = IntervalArithmetic
-const VERSION_STR = "v7.1"
+const VERSION_STR = "v7.3"
 
 # ============================
 # Lorenz dynamics
@@ -67,6 +72,7 @@ Base.@kwdef mutable struct Config
     global_t_max::Float64              = 25.0
     chunk_len::Float64                 = 1.0
     target_time_width::Float64         = 0.05
+    root_locator::Symbol               = :bisect_squeeze  # :bisect or :bisect_squeeze
     # uncertified random hop time range
     hop_min::Float64                   = 1.0
     hop_max::Float64                   = 3.0
@@ -102,6 +108,12 @@ function parse_kv!(cfg::Config, arg::AbstractString)
     elseif k == "--eps-box"             cfg.eps_box = parse(Float64, v)
     elseif k == "--init-range"
         cfg.init_range = parse_init_range(v)
+    elseif k == "--root-locator"
+        vl = lowercase(v)
+        cfg.root_locator =
+            vl == "bisect" ? :bisect :
+            vl == "bisect_squeeze" ? :bisect_squeeze :
+            error("--root-locator must be 'bisect' or 'bisect_squeeze'")
     end
     return cfg
 end
@@ -179,7 +191,8 @@ function certify_upward_crossing!(
     target_time_width::Float64,
     max_expand::Int = 8,
     max_bisect::Int = 22,
-    alg_refined = TMJets21a(abstol=1e-11, orderT=6, orderQ=2, maxsteps=120000)
+    alg_refined = TMJets21a(abstol=1e-11, orderT=6, orderQ=2, maxsteps=120000),
+    root_locator::Symbol = :bisect_squeeze
 )::Tuple{Bool,Float64,Float64,IA.Interval{Float64},IA.Interval{Float64},Float64,Float64}
 
     _, _, zI0 = xyz_intervals_from_box(B_below)
@@ -221,7 +234,7 @@ function certify_upward_crossing!(
         return (false, 0.0, 0.0, IA.Interval(0,0), IA.Interval(0,0), 0.0, 0.0)
     end
 
-    # 2) Bisection with direction check on hull{lo,mid,hi}
+    # 2) Bisection with optional slope squeezing on hull{lo,mid,hi}
     τ_lo = T_total
     τ_hi = T_total + T
     last_dz_min = -Inf
@@ -249,6 +262,7 @@ function certify_upward_crossing!(
         dzI_all = dz_interval(xI_all, yI_all, zI_all)
         last_dz_min, last_dz_max = IA.inf(dzI_all), IA.sup(dzI_all)
 
+        # Update bisection bracket by mid sign
         if IA.inf(zI_mid) > section
             B_hi = B_mid
             τ_hi = τ_mid
@@ -257,6 +271,28 @@ function certify_upward_crossing!(
             τ_lo = τ_mid
         end
 
+        # Optional: slope squeezing using endpoint gaps and dz/dt bounds
+        if root_locator === :bisect_squeeze
+            # endpoint gaps to the guard
+            Δlo = max(0.0, section - IA.sup(zI_lo))  # how far below at τ_lo
+            Δhi = max(0.0, IA.inf(zI_hi) - section)  # how far above at τ_hi
+            m = last_dz_min               # inf(dz/dt) on hull
+            M = last_dz_max               # sup(dz/dt) on hull
+            if m > 0 && Δhi > 0
+                τ_hi = min(τ_hi, τ_hi - Δhi / m)
+            end
+            if M > 0 && Δlo > 0
+                τ_lo = max(τ_lo, τ_lo + Δlo / M)
+            end
+            # maintain order
+            if τ_hi <= τ_lo
+                # if degenerate due to rounding, step back slightly
+                ϵ = max(eps(τ_lo), 1e-15)
+                τ_hi = τ_lo + ϵ
+            end
+        end
+
+        # Stopping condition
         if (τ_hi - τ_lo) ≤ target_time_width && last_dz_min > 0
             return (true, t_start_abs + τ_lo, t_start_abs + τ_hi, yI_lo, yI_hi, last_dz_min, last_dz_max)
         end
@@ -292,7 +328,7 @@ function run_certified_sequence(X_start::Hyperrectangle, cfg::Config)::SequenceR
     symbols = Char[]
     hit_brackets = Vector{Tuple{Float64,Float64}}()
     awaiting_new_cross = true
-    last_below_box::Union{Nothing,Hyperrectangle} = nothing  # TYPED LOCAL (fix)
+    last_below_box::Union{Nothing,Hyperrectangle} = nothing
     last_below_tend_abs = 0.0
 
     stopped_uncertified = false
@@ -347,7 +383,8 @@ function run_certified_sequence(X_start::Hyperrectangle, cfg::Config)::SequenceR
                     B_below=last_below_box, section=cfg.section,
                     t_start_abs=last_below_tend_abs,
                     target_time_width=cfg.target_time_width,
-                    alg_refined=cfg.local_alg
+                    alg_refined=cfg.local_alg,
+                    root_locator=cfg.root_locator
                 )
 
                 if ok
@@ -407,7 +444,7 @@ function uncertified_integrate(u0::NTuple{3,Float64}, T::Float64; reltol=1e-6, a
 end
 
 # ============================
-# Reporting (requested format)
+# Reporting (append; prepend multi-run notice once)
 # ============================
 # Format: HH:MM:SS.mmm
 function fmt_runtime(ms::Int)
@@ -420,16 +457,35 @@ function fmt_runtime(ms::Int)
     return @sprintf("%d:%02d:%02d.%03d", h, m, s, mm)
 end
 
-function write_report(cfg::Config;
+function ensure_multi_run_notice(path::String)
+    if isfile(path)
+        txt = read(path, String)
+        if isempty(txt) || !startswith(txt, "This file contains multiple runs")
+            open(path, "w") do io
+                println(io, "This file contains multiple runs")
+                println(io, txt)
+            end
+        end
+    end
+end
+
+function append_report(cfg::Config;
     seed::Int,
     sequences::Vector{String},
     init_pt::NTuple{3,Float64},
     start_points::Vector{NTuple{3,Float64}},
     runtime_ms::Int
 )
-    open(cfg.output_path, "w") do io
-        # Exact header requested by the user:
-        println(io, "7_1CertifiedSignSequence.jl")
+    if isfile(cfg.output_path)
+        ensure_multi_run_notice(cfg.output_path)
+        mode = "a"
+    else
+        mode = "w"
+    end
+
+    open(cfg.output_path, mode) do io
+        println(io) # blank line between runs
+        println(io, "7_3CertifiedSignSequence.jl")
         println(io, "Program Run Time: ", fmt_runtime(runtime_ms))
         println(io, "Random seed: ", seed)
         println(io, "")
@@ -438,31 +494,27 @@ function write_report(cfg::Config;
         println(io, "  global_t_max         = $(cfg.global_t_max)")
         println(io, "  chunk_len            = $(cfg.chunk_len)")
         println(io, "  target_time_width    = $(cfg.target_time_width)")
+        println(io, "  root_locator         = $(cfg.root_locator)")
         println(io, "  burn_in              = $(cfg.burn_in)")
         println(io, "  hop_min..hop_max     = $(cfg.hop_min)..$(cfg.hop_max)")
         println(io, "  eps_box              = $(cfg.eps_box)")
         println(io, "  init_range           = $(cfg.init_range)")
         println(io, "")
         println(io, "Initial random point   = $(init_pt)")
-
-        # Post burn-in / hop points per sequence (requested wording)
         for (k, pt) in enumerate(start_points)
             if k == 1
-                # Match sample: "Post burn-in point 1    = (...)"
                 println(io, "Post burn-in point $(k)    = $(pt)")
             else
-                # Match sample: "Post-burn in point 2 = ...."
                 println(io, "Post-burn in point $(k) = $(pt)")
             end
         end
-
         println(io, "")
         println(io, "Sign sequences separated by newlines:")
         for s in sequences
             println(io, s)
         end
     end
-    println("Wrote report to: $(cfg.output_path)")
+    println("Report written/appended → $(cfg.output_path)")
 end
 
 # ============================
@@ -472,7 +524,7 @@ function main()
     cfg = get_config()
     t0_ns = time_ns()
     println("Starting run at $(now()). Version $(VERSION_STR)")
-    println("Requested sequences: $(cfg.num_sequences)  |  burn-in: $(cfg.burn_in) s  |  output: $(cfg.output_path)")
+    println("Requested sequences: $(cfg.num_sequences)  |  burn-in: $(cfg.burn_in) s  |  output: $(cfg.output_path)  |  root_locator: $(cfg.root_locator)")
 
     # Dedicated RNG for *all* random draws → reproducible results
     rng = MersenneTwister(cfg.seed)
@@ -484,7 +536,7 @@ function main()
 
     # Burn-in (uncertified) to get near attractor (deterministic given u0, T, solver/tols)
     u_burn = uncertified_integrate(u0, cfg.burn_in)
-    println("Post burn-in point: $(u_burn)")
+    println("Post burn-in point 1 = $(u_burn)")
 
     sequences = String[]
     start_points = NTuple{3,Float64}[]
@@ -502,7 +554,6 @@ function main()
         end
 
         # Determine next starting point:
-        # If we stopped due to uncertifiable slab, take its center; otherwise use current X_start center.
         u_est = if res.stopped_uncertified && !(res.stop_box === nothing)
             center_point(res.stop_box)
         else
@@ -511,14 +562,14 @@ function main()
         # Random uncertified hop to decorrelate — draw from dedicated RNG
         hop_T = rand(rng) * (cfg.hop_max - cfg.hop_min) + cfg.hop_min
         u_next = uncertified_integrate(u_est, hop_T)
-        println("Post-hop point: $(u_next)")
+        println("Post burn-in point $(seq_idx+1) = $(u_next)")
 
         push!(start_points, u_next)
         X_start = box_from_point(u_next, cfg.eps_box)
     end
 
     runtime_ms = Int(round((time_ns() - t0_ns) / 1e6))
-    write_report(cfg;
+    append_report(cfg;
         seed = cfg.seed,
         sequences = sequences,
         init_pt = u0,

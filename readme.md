@@ -2,7 +2,7 @@
 
 ## What this script does
 
-`7_1_CertifiedSignSequence.jl` generates **rigorously certified sign sequences** (`L`/`R`) for the Lorenz system by detecting **upward crossings** of the plane `z = 27`. Each certified crossing is labeled by the **sign of `y`** on a rigorously validated time bracket around the crossing (`L` if `y<0`, `R` if `y>0`).
+`CertifiedSignSequence.jl` generates **rigorously certified sign sequences** (`L`/`R`) for the Lorenz system by detecting **upward crossings** of the plane `z = 27`. Each certified crossing is labeled by the **sign of `y`** on a rigorously validated time bracket around the crossing (`L` if `y<0`, `R` if `y>0`).
 
 The run has two phases:
 

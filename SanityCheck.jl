@@ -1,4 +1,4 @@
-# SanityCheck_7_4.jl
+# SanityCheck.jl
 #
 # Runs 7_4CertifiedSignSequence.jl several times with different
 # approximation knobs (chunk size, bracket width, root locator),
@@ -8,7 +8,7 @@
 using Dates
 using Printf
 
-const SCRIPT = joinpath(@__DIR__, "7_4CertifiedSignSequence.jl")
+const SCRIPT = joinpath(@__DIR__, "CertifiedSignSequence.jl")
 const N_PREFIX = 8
 const FIXED_SEED = 930415324  # reproducible initial point + hop
 
