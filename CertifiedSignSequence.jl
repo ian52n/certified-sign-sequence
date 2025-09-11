@@ -66,7 +66,7 @@ Base.@kwdef mutable struct Config
     seed::Int
     burn_in::Float64                    = 5.0
     num_sequences::Int                 = 2
-    output_path::String                = "CertifiedSignSequence_report.txt"
+    output_path::String = string(Dates.format(now(), "yyyymmdd_HHMMSS"), "_CertifiedSignSequence.txt")
     # Certified scan knobs
     section::Float64                   = 27.0
     global_t_max::Float64              = 25.0
@@ -457,18 +457,6 @@ function fmt_runtime(ms::Int)
     return @sprintf("%d:%02d:%02d.%03d", h, m, s, mm)
 end
 
-function ensure_multi_run_notice(path::String)
-    if isfile(path)
-        txt = read(path, String)
-        if isempty(txt) || !startswith(txt, "This file contains multiple runs")
-            open(path, "w") do io
-                println(io, "This file contains multiple runs")
-                println(io, txt)
-            end
-        end
-    end
-end
-
 function append_report(cfg::Config;
     seed::Int,
     sequences::Vector{String},
@@ -476,16 +464,9 @@ function append_report(cfg::Config;
     start_points::Vector{NTuple{3,Float64}},
     runtime_ms::Int
 )
-    if isfile(cfg.output_path)
-        ensure_multi_run_notice(cfg.output_path)
-        mode = "a"
-    else
-        mode = "w"
-    end
+    open(cfg.output_path, "w") do io
+        println(io, "CertifiedSignSequence.jl")
 
-    open(cfg.output_path, mode) do io
-        println(io) # blank line between runs
-        println(io, "7_3CertifiedSignSequence.jl")
         println(io, "Program Run Time: ", fmt_runtime(runtime_ms))
         println(io, "Random seed: ", seed)
         println(io, "")
@@ -514,7 +495,7 @@ function append_report(cfg::Config;
             println(io, s)
         end
     end
-    println("Report written/appended → $(cfg.output_path)")
+        println("Report written → $(cfg.output_path)")
 end
 
 # ============================
