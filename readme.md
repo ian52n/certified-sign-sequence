@@ -1,4 +1,4 @@
-# 7_1_CertifiedSignSequence.jl — README
+# CertifiedSignSequence.jl — README
 
 ## What this script does
 

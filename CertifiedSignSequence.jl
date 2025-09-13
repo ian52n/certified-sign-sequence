@@ -1,5 +1,5 @@
 ############################################################
-# 7_4CertifiedSignSequence.jl — MULTI-SEQUENCE (v7.4)
+# 7_5CertifiedSignSequence.jl — MULTI-SEQUENCE (v7.5)
 #
 # What this version does:
 # • Starts from a random point (or user-provided range), performs
@@ -17,11 +17,10 @@
 #
 # New in this edit:
 # • Added `root_locator` knob with options:
-#     :bisect           — plain bisection
-#     :bisect_squeeze   — bisection + slope squeezing (default)
+#     :bisect           — plain bisection (default)
+#     :bisect_squeeze   — bisection + slope squeezing 
 #   Slope squeezing uses already-available derivative bounds to
-#   contract the time bracket without re-integration, preserving
-#   rigor and reducing iterations.
+#   contract the time bracket without re-integration, but may introduce rounding error
 # • Printed `root_locator` in the report.
 #
 # Reproducibility:
@@ -39,7 +38,7 @@ using Random
 using Printf
 
 const IA = IntervalArithmetic
-const VERSION_STR = "v7.3"
+const VERSION_STR = "v7.5"
 
 # ============================
 # Lorenz dynamics
@@ -63,8 +62,9 @@ end
 # Configuration / CLI
 # ============================
 Base.@kwdef mutable struct Config
+    check_symmetry::Bool               = false
     seed::Int
-    burn_in::Float64                    = 5.0
+    burn_in::Float64                   = 10.0
     num_sequences::Int                 = 2
     output_path::String = string(Dates.format(now(), "yyyymmdd_HHMMSS"), "_CertifiedSignSequence.txt")
     # Certified scan knobs
@@ -72,12 +72,9 @@ Base.@kwdef mutable struct Config
     global_t_max::Float64              = 25.0
     chunk_len::Float64                 = 1.0
     target_time_width::Float64         = 0.05
-    root_locator::Symbol               = :bisect_squeeze  # :bisect or :bisect_squeeze
-    # uncertified random hop time range
-    hop_min::Float64                   = 1.0
-    hop_max::Float64                   = 3.0
+    root_locator::Symbol               = :bisect  # :bisect or :bisect_squeeze
     # initial random sampling range (if not provided via --init-range)
-    init_range::NTuple{6,Float64}      = (-15.0, 15.0, -20.0, 20.0, 10.0, 40.0)
+    init_range::NTuple{6,Float64}      = (-20.0, 20.0, -20.0, 20.0, 0.1, 50.0)
     eps_box::Float64                   = 1e-4  # half-width for initial certified box
     # Global flowpipe algorithm (coarser for speed)
     global_alg                         = TMJets21a(abstol=1e-8, orderT=4, orderQ=1, maxsteps=25000)
@@ -97,14 +94,13 @@ function parse_kv!(cfg::Config, arg::AbstractString)
     k, v = split(arg, "=", limit=2)
     k = strip(k); v = strip(v)
     if     k == "--seed"                cfg.seed = parse(Int, v)
+    elseif k == "--check-symmetry" cfg.check_symmetry = parse(Bool, lowercase(v))
     elseif k == "--burn-in"             cfg.burn_in = parse(Float64, v)
     elseif k == "--num-sequences"       cfg.num_sequences = parse(Int, v)
     elseif k == "--output"              cfg.output_path = v
     elseif k == "--target-time-width"   cfg.target_time_width = parse(Float64, v)
     elseif k == "--global-t-max"        cfg.global_t_max = parse(Float64, v)
     elseif k == "--chunk-len"           cfg.chunk_len = parse(Float64, v)
-    elseif k == "--hop-min"             cfg.hop_min = parse(Float64, v)
-    elseif k == "--hop-max"             cfg.hop_max = parse(Float64, v)
     elseif k == "--eps-box"             cfg.eps_box = parse(Float64, v)
     elseif k == "--init-range"
         cfg.init_range = parse_init_range(v)
@@ -124,7 +120,6 @@ function get_config()::Config
     for a in ARGS
         parse_kv!(cfg, a)
     end
-    cfg.hop_max ≥ cfg.hop_min || error("--hop-max must be ≥ --hop-min")
     return cfg
 end
 
@@ -245,13 +240,14 @@ function certify_upward_crossing!(
     for _ in 1:max_bisect
         τ_mid = (τ_lo + τ_hi) / 2
 
+        # reuse mid_cache if present, or compute B_mid (same pattern as in the loop)
         B_mid = get!(mid_cache, τ_mid) do
             prob_mid = @ivp(x' = lorenz!(x), dim: 3, x(0) ∈ B_below)
             sol_mid_tm = solve(prob_mid, T=τ_mid, alg=alg_refined)
-            sol_mid = overapproximate(sol_mid_tm, Hyperrectangle)
-            set(sol_mid[end]) |> box_of
+            overapproximate(sol_mid_tm, Hyperrectangle) |> (s -> set(s[end]) |> box_of)
         end
 
+        # extract intervals
         xI_lo, yI_lo, zI_lo = xyz_intervals_from_box(B_lo)
         xI_mid, yI_mid, zI_mid = xyz_intervals_from_box(B_mid)
         xI_hi, yI_hi, zI_hi = xyz_intervals_from_box(B_hi)
@@ -259,7 +255,10 @@ function certify_upward_crossing!(
         xI_all = hull3(xI_lo, xI_mid, xI_hi)
         yI_all = hull3(yI_lo, yI_mid, yI_hi)
         zI_all = hull3(zI_lo, zI_mid, zI_hi)
-        dzI_all = dz_interval(xI_all, yI_all, zI_all)
+        dzI_all = dz_interval(hull3(xI_lo, xI_mid, xI_hi),
+                            hull3(yI_lo, yI_mid, yI_hi),
+                            hull3(zI_lo, zI_mid, zI_hi))
+
         last_dz_min, last_dz_max = IA.inf(dzI_all), IA.sup(dzI_all)
 
         # Update bisection bracket by mid sign
@@ -298,11 +297,29 @@ function certify_upward_crossing!(
         end
     end
 
-    # Final acceptance if positive and small enough
+    # --- ensure dz bounds / y-intervals correspond to the final [τ_lo, τ_hi] bracket
+    τ_mid_final = (τ_lo + τ_hi) / 2
+
+    # reuse cached midpoint if present, or compute it (avoids duplicate work)
+    B_mid_final = get!(mid_cache, τ_mid_final) do
+        prob_mid = @ivp(x' = lorenz!(x), dim: 3, x(0) ∈ B_below)
+        sol_mid_tm = solve(prob_mid, T=τ_mid_final, alg=alg_refined)
+        overapproximate(sol_mid_tm, Hyperrectangle) |> (s->set(s) |> box_of)
+    end
+
+    # re-extract intervals for the current endpoints and the final mid
     xI_lo, yI_lo, zI_lo = xyz_intervals_from_box(B_lo)
+    xI_mid, yI_mid, zI_mid = xyz_intervals_from_box(B_mid_final)
     xI_hi, yI_hi, zI_hi = xyz_intervals_from_box(B_hi)
-    dzI_all = dz_interval(hull3(xI_lo,xI_hi,xI_lo), hull3(yI_lo,yI_hi,yI_lo), hull3(zI_lo,zI_hi,zI_lo))
+
+    dzI_all = dz_interval(hull3(xI_lo, xI_mid, xI_hi),
+                        hull3(yI_lo, yI_mid, yI_hi),
+                        hull3(zI_lo, zI_mid, zI_hi))
+
     last_dz_min, last_dz_max = IA.inf(dzI_all), IA.sup(dzI_all)
+    # --- now last_dz_min/last_dz_max and yI_lo/yI_hi refer to the final bracket
+
+    # Final acceptance if positive and small enough
 
     if last_dz_min > 0 && (τ_hi - τ_lo) ≤ target_time_width
         return (true, t_start_abs + τ_lo, t_start_abs + τ_hi, yI_lo, yI_hi, last_dz_min, last_dz_max)
@@ -444,7 +461,7 @@ function uncertified_integrate(u0::NTuple{3,Float64}, T::Float64; reltol=1e-6, a
 end
 
 # ============================
-# Reporting (append; prepend multi-run notice once)
+# Reporting
 # ============================
 # Format: HH:MM:SS.mmm
 function fmt_runtime(ms::Int)
@@ -466,22 +483,21 @@ function append_report(cfg::Config;
 )
     open(cfg.output_path, "w") do io
         println(io, "CertifiedSignSequence.jl")
-
+        println(io, "Version $(VERSION_STR)")
         println(io, "Program Run Time: ", fmt_runtime(runtime_ms))
         println(io, "Random seed: ", seed)
         println(io, "")
         println(io, "Parameters / Knobs")
+        println(io, "  check_symmetry       = $(cfg.check_symmetry)")
         println(io, "  section              = $(cfg.section)")
         println(io, "  global_t_max         = $(cfg.global_t_max)")
         println(io, "  chunk_len            = $(cfg.chunk_len)")
         println(io, "  target_time_width    = $(cfg.target_time_width)")
         println(io, "  root_locator         = $(cfg.root_locator)")
         println(io, "  burn_in              = $(cfg.burn_in)")
-        println(io, "  hop_min..hop_max     = $(cfg.hop_min)..$(cfg.hop_max)")
         println(io, "  eps_box              = $(cfg.eps_box)")
         println(io, "  init_range           = $(cfg.init_range)")
         println(io, "")
-        println(io, "Initial random point   = $(init_pt)")
         for (k, pt) in enumerate(start_points)
             if k == 1
                 println(io, "Post burn-in point $(k)    = $(pt)")
@@ -489,13 +505,16 @@ function append_report(cfg::Config;
                 println(io, "Post-burn in point $(k) = $(pt)")
             end
         end
+
         println(io, "")
         println(io, "Sign sequences separated by newlines:")
         for s in sequences
             println(io, s)
         end
-    end
-        println("Report written → $(cfg.output_path)")
+    end # The `open` block finishes here.
+
+    # This confirmation now prints *after* the file is successfully closed.
+    println("Report written → $(cfg.output_path)")
 end
 
 # ============================
@@ -509,51 +528,67 @@ function main()
 
     # Dedicated RNG for *all* random draws → reproducible results
     rng = MersenneTwister(cfg.seed)
-
-    # Pick initial point with dedicated RNG
+    # Get the sampling range once, before the loop
     (xl, xh, yl, yh, zl, zh) = cfg.init_range
-    u0 = (rand(rng)*(xh-xl)+xl, rand(rng)*(yh-yl)+yl, rand(rng)*(zh-zl)+zl)
-    println("Random initial point: $(u0)")
 
-    # Burn-in (uncertified) to get near attractor (deterministic given u0, T, solver/tols)
-    u_burn = uncertified_integrate(u0, cfg.burn_in)
-    println("Post burn-in point 1 = $(u_burn)")
-
+    # Initialize containers for results
     sequences = String[]
     start_points = NTuple{3,Float64}[]
-    push!(start_points, u_burn)
+    first_random_point = NTuple{3,Float64}[] # To store for the report
+    sequence_count = 0
 
-    X_start = box_from_point(u_burn, cfg.eps_box)
+    # =================================================================
+    # A. DEFINE THE HELPER FUNCTION
+    # This function encapsulates the logic for processing one point.
+    # It modifies the variables from the parent `main` scope.
+    # =================================================================
+        function process_one_point!(point_to_process::NTuple{3,Float64})
+            sequence_count += 1
 
-    for seq_idx in 1:cfg.num_sequences
-        println("\n===== Generating certified sign sequence $(seq_idx) =====")
-        res = run_certified_sequence(X_start, cfg)
-        push!(sequences, res.symbols)
+            # 1. Perform burn-in
+            u_burn = uncertified_integrate(point_to_process, cfg.burn_in)
+            println("Post burn-in point $(sequence_count) = $(u_burn)")
+            push!(start_points, u_burn)
 
-        if seq_idx == cfg.num_sequences
-            break
+            # 2. Create initial box
+            X_start = box_from_point(u_burn, cfg.eps_box)
+            
+            # 3. Run the certified sequence and store results
+            println("\n===== Generating certified sign sequence $(sequence_count) =====")
+            res = run_certified_sequence(X_start, cfg)
+            push!(sequences, res.symbols)
         end
 
-        # Determine next starting point:
-        u_est = if res.stopped_uncertified && !(res.stop_box === nothing)
-            center_point(res.stop_box)
-        else
-            center_point(X_start)
-        end
-        # Random uncertified hop to decorrelate — draw from dedicated RNG
-        hop_T = rand(rng) * (cfg.hop_max - cfg.hop_min) + cfg.hop_min
-        u_next = uncertified_integrate(u_est, hop_T)
-        println("Post burn-in point $(seq_idx+1) = $(u_next)")
+        # =================================================================
+        # B. THE NEW MAIN LOOP
+        # This loop continues until the desired number of sequences is generated.
+        # =================================================================
+        println("Symmetry check enabled: $(cfg.check_symmetry)")
+        while sequence_count < cfg.num_sequences
+            # 1. Generate a new random point
+            u_rand = (rand(rng)*(xh-xl)+xl, rand(rng)*(yh-yl)+yl, rand(rng)*(zh-zl)+zl)
+            if sequence_count == 0
+                first_random_point = u_rand
+                println("Random initial point: $(u_rand)")
+            end
 
-        push!(start_points, u_next)
-        X_start = box_from_point(u_next, cfg.eps_box)
-    end
+            # 2. Process the random point
+            process_one_point!(u_rand)
+
+            # 3. If symmetry check is on, process the symmetric partner
+            if cfg.check_symmetry && sequence_count < cfg.num_sequences
+                # Define the symmetric point (-x, -y, z)
+                u_symm = (-u_rand[1], -u_rand[2], u_rand[3])
+                println("--- Generating sequence for symmetric counterpart ---")
+                process_one_point!(u_symm)
+            end
+        end
 
     runtime_ms = Int(round((time_ns() - t0_ns) / 1e6))
     append_report(cfg;
         seed = cfg.seed,
         sequences = sequences,
-        init_pt = u0,
+        init_pt = first_random_point, # Report the first random point
         start_points = start_points,
         runtime_ms = runtime_ms
     )
