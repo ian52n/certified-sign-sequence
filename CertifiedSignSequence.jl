@@ -304,7 +304,7 @@ function certify_upward_crossing!(
     B_mid_final = get!(mid_cache, τ_mid_final) do
         prob_mid = @ivp(x' = lorenz!(x), dim: 3, x(0) ∈ B_below)
         sol_mid_tm = solve(prob_mid, T=τ_mid_final, alg=alg_refined)
-        overapproximate(sol_mid_tm, Hyperrectangle) |> (s->set(s) |> box_of)
+        overapproximate(sol_mid_tm, Hyperrectangle) |> (s->set(s[end]) |> box_of)
     end
 
     # re-extract intervals for the current endpoints and the final mid
