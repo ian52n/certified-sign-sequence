@@ -500,9 +500,9 @@ function append_report(cfg::Config;
         println(io, "")
         for (k, pt) in enumerate(start_points)
             if k == 1
-                println(io, "Post burn-in point $(k)    = $(pt)")
+                println(io, "Post burn-in point $(k) = $(pt)")
             else
-                println(io, "Post-burn in point $(k) = $(pt)")
+                println(io, "Post burn-in point $(k) = $(pt)")
             end
         end
 
