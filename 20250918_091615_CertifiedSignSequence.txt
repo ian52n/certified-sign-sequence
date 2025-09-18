@@ -1,7 +1,7 @@
 CertifiedSignSequence.jl
 Version v7.5
-Program Run Time: 0:02:35.317
-Random seed: 455624639
+Program Run Time: 0:01:59.152
+Random seed: 870175070
 
 Parameters / Knobs
   check_symmetry       = true
@@ -10,13 +10,13 @@ Parameters / Knobs
   chunk_len            = 1.0
   target_time_width    = 0.05
   root_locator         = bisect
-  burn_in              = 10.0
+  burn_in              = 100.0
   eps_box              = 0.0001
   init_range           = (-20.0, 20.0, -20.0, 20.0, 0.1, 50.0)
 
-Post burn-in point 1 = (-14.455927376221576, -19.849570843897425, 28.82783930890902)
-Post burn-in point 2 = (14.455927376221576, 19.849570843897425, 28.82783930890902)
+Post burn-in point 1 = (12.667800599856509, 5.576451754656768, 38.77958641336811)
+Post burn-in point 2 = (-12.667800599856509, -5.576451754656768, 38.77958641336811)
 
 Sign sequences separated by newlines:
-RLRRR
-LRLLL
+LRRRL
+RLLLR

@@ -1,5 +1,5 @@
 ############################################################
-# 7_5CertifiedSignSequence.jl — MULTI-SEQUENCE (v7.5)
+# 7_6CertifiedSignSequence.jl — MULTI-SEQUENCE (v7.6)
 #
 # What this version does:
 # • Starts from a random point (or user-provided range), performs
@@ -25,8 +25,7 @@
 #
 # Reproducibility:
 # • All randomness comes from a *dedicated* RNG instance
-#   (MersenneTwister seeded via --seed). Initial point and hop
-#   times are reproducible.
+#   (MersenneTwister seeded via --seed). Initial points are reproducable
 ############################################################
 
 using ReachabilityAnalysis
@@ -37,8 +36,11 @@ using Dates
 using Random
 using Printf
 
+include("UncertifiedIntegrate.jl")
+using .UncertifiedIntegrate
+
 const IA = IntervalArithmetic
-const VERSION_STR = "v7.5"
+const VERSION_STR = "v7.6"
 
 # ============================
 # Lorenz dynamics
@@ -50,21 +52,13 @@ const VERSION_STR = "v7.5"
     dx[3] = x[1] * x[2] - β * x[3]
 end
 
-# OrdinaryDiffEq version for uncertified steps
-function lorenz_ode!(du, u, p, t)
-    σ, ρ, β = 10.0, 28.0, 8/3
-    du[1] = σ * (u[2] - u[1])
-    du[2] = u[1] * (ρ - u[3]) - u[2]
-    du[3] = u[1] * u[2] - β * u[3]
-end
-
 # ============================
 # Configuration / CLI
 # ============================
 Base.@kwdef mutable struct Config
     check_symmetry::Bool               = false
     seed::Int
-    burn_in::Float64                   = 10.0
+    burn_in::Float64                   = 100.0
     num_sequences::Int                 = 2
     output_path::String = string(Dates.format(now(), "yyyymmdd_HHMMSS"), "_CertifiedSignSequence.txt")
     # Certified scan knobs
@@ -450,17 +444,6 @@ function run_certified_sequence(X_start::Hyperrectangle, cfg::Config)::SequenceR
 end
 
 # ============================
-# Uncertified steps (burn-in / hop)
-# ============================
-function uncertified_integrate(u0::NTuple{3,Float64}, T::Float64; reltol=1e-6, abstol=1e-6)
-    u = collect(u0)
-    prob = ODEProblem(lorenz_ode!, u, (0.0, T))
-    sol = solve(prob, Tsit5(); reltol=reltol, abstol=abstol)
-    uT = sol.u[end]
-    return (Float64(uT[1]), Float64(uT[2]), Float64(uT[3]))
-end
-
-# ============================
 # Reporting
 # ============================
 # Format: HH:MM:SS.mmm
@@ -545,14 +528,14 @@ function main()
         function process_one_point!(point_to_process::NTuple{3,Float64})
             sequence_count += 1
 
-            # 1. Perform burn-in
-            u_burn = uncertified_integrate(point_to_process, cfg.burn_in)
+            # 1. Perform burn-in using the dedicated RNG
+            u_burn = uncertified_integrate(point_to_process, cfg.burn_in; rng=rng)
             println("Post burn-in point $(sequence_count) = $(u_burn)")
             push!(start_points, u_burn)
 
-            # 2. Create initial box
+            # 2. Create initial box around the burn-in point
             X_start = box_from_point(u_burn, cfg.eps_box)
-            
+
             # 3. Run the certified sequence and store results
             println("\n===== Generating certified sign sequence $(sequence_count) =====")
             res = run_certified_sequence(X_start, cfg)
