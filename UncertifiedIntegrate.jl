@@ -13,16 +13,19 @@ function lorenz_ode!(du, u, p, t)
 end
 
 """
-    uncertified_integrate(u0::NTuple{3,Float64}, T::Float64; rng, reltol=1e-6, abstol=1e-6)
-
-Integrate Lorenz system starting from `u0` until the trajectory has intersected the
+1. Integrate Lorenz system starting from `u0` until for 10 time units to generate u.
+2. Start from u and integrate until the trajectory has intersected the
 z=27 plane with dz/dt>0 at least 5 times (tracking the sign of y). If `T` is reached first,
 a new random initial point is drawn from `rng` and retried. Once 5 crossings are reached,
-integrates an additional 10 time units and returns the final state.
+integrates an additional 30 time units and returns the final state.
 """
 function uncertified_integrate(u0::NTuple{3,Float64}, T::Float64; rng::AbstractRNG, reltol=1e-6, abstol=1e-6)
     while true
-        u = collect(u0)
+        # === NEW: prepend 10 units integration without checks ===
+        u_preprob = ODEProblem(lorenz_ode!, collect(u0), (0.0, 10.0))
+        sol_pre = solve(u_preprob, Tsit5(); reltol=reltol, abstol=abstol, save_everystep=false)
+        u = sol_pre.u[end]   # this becomes the "real" start point
+
         crossings = Ref(0)
         last_y_sign = 0.0
 
@@ -55,14 +58,14 @@ function uncertified_integrate(u0::NTuple{3,Float64}, T::Float64; rng::AbstractR
 
         if crossings[] < 5
             # T reached before 5 crossings → generate new random point
-            u0 = (rand(rng)*40-20, rand(rng)*40-20, rand(rng)*50 + 0.1)
+            u0 = (rand(rng)*40-20, rand(rng)*40-20, rand(rng)*50)
             println("T reached before 5 crossings. Retrying with new point: $(u0)")
             continue
         end
 
-        # Integrate an additional 10 time units from the last state
+        # Integrate an additional 30 time units from the last state
         u_last = sol.u[end]
-        prob_extra = ODEProblem(lorenz_ode!, u_last, (0.0, 10.0))
+        prob_extra = ODEProblem(lorenz_ode!, u_last, (0.0, 30.0))
         sol_extra = solve(prob_extra, Tsit5(); reltol=reltol, abstol=abstol, save_everystep=false)
         u_final = sol_extra.u[end]
         return (Float64(u_final[1]), Float64(u_final[2]), Float64(u_final[3]))

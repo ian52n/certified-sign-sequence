@@ -16,6 +16,7 @@ using Dates
 using Printf
 using LinearAlgebra
 using Plots
+using OrdinaryDiffEq
 
 include("UncertifiedIntegrate.jl")
 using .UncertifiedIntegrate
@@ -54,7 +55,8 @@ fixed_points = [
 # -----------------------------
 # Distance to nearest fixed point
 # -----------------------------
-distance_to_nearest_fp(u::NTuple{3,Float64}) = minimum([norm([u[1]-fx[1], u[2]-fx[2], u[3]-fx[3]]) for fx in fixed_points])
+distance_to_nearest_fp(u::NTuple{3,Float64}) =
+    minimum([norm([u[1]-fx[1], u[2]-fx[2], u[3]-fx[3]]) for fx in fixed_points])
 
 # -----------------------------
 # Main program
@@ -81,7 +83,7 @@ min_d = isempty(distances) ? NaN : minimum(distances)
 
 t_end = now()
 # Compute runtime in milliseconds
-runtime_ms = Dates.value(t_end - t_start)  # returns Int, milliseconds
+runtime_ms = Dates.value(t_end - t_start)
 h  = runtime_ms ÷ 3_600_000
 r1 = runtime_ms % 3_600_000
 m  = r1 ÷ 60_000
@@ -92,16 +94,34 @@ runtime_str = @sprintf("%d:%02d:%02d.%03d", h, m, s, ms)
 println("Simulation runtime: $runtime_str")
 
 # -----------------------------
-# Plot projection onto y-z plane
+# Special trajectory from (0.01,0.01,0)
 # -----------------------------
+u0_special = [0.01, 0.01, 0.0]
+prob_special = ODEProblem(UncertifiedIntegrate.lorenz_ode!, u0_special, (0.0, 17.5))
+sol_special = solve(prob_special, Tsit5(); reltol=1e-6, abstol=1e-6)
+xs_special = [u[1] for u in sol_special.u]
+ys_special = [u[2] for u in sol_special.u]
+xplusy_special = [xs_special[i] + ys_special[i] for i in eachindex(xs_special)]
+zs_special = [u[3] for u in sol_special.u]
+
+# -----------------------------
+# Projection of uncertified points
+# -----------------------------
+xs = [p[1] for p in points_final]
 ys = [p[2] for p in points_final]
+xplusy = [xs[i] + ys[i] for i in eachindex(xs)]
 zs = [p[3] for p in points_final]
 
-scatter(ys, zs, markersize=1,
-        xlabel="y", ylabel="z",
-        legend=false)
+# -----------------------------
+# Plot
+# -----------------------------
+plot(xplusy_special, zs_special, color=:red, lw=1.5, alpha=0.6, label="", xlabel="x + y", ylabel="z", legend=false)
+scatter!(xplusy, zs, markersize=1)
 
+
+# -----------------------------
 # Annotate plot
+# -----------------------------
 annot_text = """
 num_points = $num_points
 T_max = $T_max
@@ -109,13 +129,10 @@ seed = $seed
 runtime = $runtime_str
 min distance to FP = $(round(min_d,digits=4))
 """
-# Add simulation info as a text box in the upper left, slightly below top
-x_pos = minimum(ys) + 0.05*(maximum(ys)-minimum(ys))
+x_pos = minimum(xplusy) + 0.05*(maximum(xplusy) - minimum(xplusy))
 y_pos = maximum(zs) - 0.05*(maximum(zs)-minimum(zs))
 
-# Add white rectangle background
 annotate!(x_pos, y_pos, text("█████████████████████████████", :left, 12, :white))
-# Add your text on top
 annotate!(
     x_pos, y_pos,
     text(
@@ -124,11 +141,14 @@ annotate!(
     )
 )
 
-fname = "UncertifiedIntegrate_yz_projection.png"
+# -----------------------------
+# Save and auto-open
+# -----------------------------
+timestamp = Dates.format(now(), "HHMMSS")
+fname = "$(num_points)_UncertifiedIntegrate_yz_projection_$(timestamp).png"
 savefig(fname)
 println("Plot saved → $fname")
 
-# Auto-open plot (cross-platform)
 if Sys.isapple()
     run(`open $fname`)
 elseif Sys.iswindows()
