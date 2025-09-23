@@ -1,5 +1,5 @@
 ############################################################
-# 7_6CertifiedSignSequence.jl — MULTI-SEQUENCE (v7.6)
+# 7_7CertifiedSignSequence.jl — No squeeze (v7.7)
 #
 # What this version does:
 # • Starts from a random point (or user-provided range), performs
@@ -14,14 +14,6 @@
 #   sequences is produced.
 # • Writes a .txt report in the format you requested and appends
 #   to an existing file (prepending a “multiple runs” notice once).
-#
-# New in this edit:
-# • Added `root_locator` knob with options:
-#     :bisect           — plain bisection (default)
-#     :bisect_squeeze   — bisection + slope squeezing 
-#   Slope squeezing uses already-available derivative bounds to
-#   contract the time bracket without re-integration, but may introduce rounding error
-# • Printed `root_locator` in the report.
 #
 # Reproducibility:
 # • All randomness comes from a *dedicated* RNG instance
@@ -40,7 +32,7 @@ include("UncertifiedIntegrate.jl")
 using .UncertifiedIntegrate
 
 const IA = IntervalArithmetic
-const VERSION_STR = "v7.6"
+const VERSION_STR = "v7.7"
 
 # ============================
 # Lorenz dynamics
@@ -66,9 +58,9 @@ Base.@kwdef mutable struct Config
     global_t_max::Float64              = 25.0
     chunk_len::Float64                 = 1.0
     target_time_width::Float64         = 0.05
-    root_locator::Symbol               = :bisect  # :bisect or :bisect_squeeze
+    root_locator::Symbol               = :bisect
     # initial random sampling range (if not provided via --init-range)
-    init_range::NTuple{6,Float64}      = (-20.0, 20.0, -20.0, 20.0, 0.1, 50.0)
+    init_range::NTuple{6,Float64}      = (-20.0, 20.0, -20.0, 20.0, 0, 50.0)
     eps_box::Float64                   = 1e-4  # half-width for initial certified box
     # Global flowpipe algorithm (coarser for speed)
     global_alg                         = TMJets21a(abstol=1e-8, orderT=4, orderQ=1, maxsteps=25000)
@@ -98,12 +90,6 @@ function parse_kv!(cfg::Config, arg::AbstractString)
     elseif k == "--eps-box"             cfg.eps_box = parse(Float64, v)
     elseif k == "--init-range"
         cfg.init_range = parse_init_range(v)
-    elseif k == "--root-locator"
-        vl = lowercase(v)
-        cfg.root_locator =
-            vl == "bisect" ? :bisect :
-            vl == "bisect_squeeze" ? :bisect_squeeze :
-            error("--root-locator must be 'bisect' or 'bisect_squeeze'")
     end
     return cfg
 end
@@ -181,7 +167,7 @@ function certify_upward_crossing!(
     max_expand::Int = 8,
     max_bisect::Int = 22,
     alg_refined = TMJets21a(abstol=1e-11, orderT=6, orderQ=2, maxsteps=120000),
-    root_locator::Symbol = :bisect_squeeze
+    root_locator::Symbol = :bisect
 )::Tuple{Bool,Float64,Float64,IA.Interval{Float64},IA.Interval{Float64},Float64,Float64}
 
     _, _, zI0 = xyz_intervals_from_box(B_below)
@@ -223,7 +209,7 @@ function certify_upward_crossing!(
         return (false, 0.0, 0.0, IA.Interval(0,0), IA.Interval(0,0), 0.0, 0.0)
     end
 
-    # 2) Bisection with optional slope squeezing on hull{lo,mid,hi}
+    # 2) Bisection on hull{lo,mid,hi}
     τ_lo = T_total
     τ_hi = T_total + T
     last_dz_min = -Inf
@@ -262,27 +248,6 @@ function certify_upward_crossing!(
         else
             B_lo = B_mid
             τ_lo = τ_mid
-        end
-
-        # Optional: slope squeezing using endpoint gaps and dz/dt bounds
-        if root_locator === :bisect_squeeze
-            # endpoint gaps to the guard
-            Δlo = max(0.0, section - IA.sup(zI_lo))  # how far below at τ_lo
-            Δhi = max(0.0, IA.inf(zI_hi) - section)  # how far above at τ_hi
-            m = last_dz_min               # inf(dz/dt) on hull
-            M = last_dz_max               # sup(dz/dt) on hull
-            if m > 0 && Δhi > 0
-                τ_hi = min(τ_hi, τ_hi - Δhi / m)
-            end
-            if M > 0 && Δlo > 0
-                τ_lo = max(τ_lo, τ_lo + Δlo / M)
-            end
-            # maintain order
-            if τ_hi <= τ_lo
-                # if degenerate due to rounding, step back slightly
-                ϵ = max(eps(τ_lo), 1e-15)
-                τ_hi = τ_lo + ϵ
-            end
         end
 
         # Stopping condition
